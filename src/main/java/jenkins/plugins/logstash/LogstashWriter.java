@@ -129,6 +129,10 @@ public class LogstashWriter implements Serializable {
    */
   public void writeBuildLog(int maxLines) {
     if (!isConnectionBroken()) {
+      
+      // ELOS custom code
+      System.out.println("ELOS test debug message");
+      
       // FIXME: build.getLog() won't have the last few lines like "Finished: SUCCESS" because this hasn't returned yet...
       List<String> logLines;
       try {
