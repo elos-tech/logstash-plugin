@@ -34,6 +34,7 @@ import hudson.model.Run;
 import hudson.model.Node;
 import hudson.tasks.test.AbstractTestResultAction;
 import hudson.tasks.test.TestResult;
+import hudson.EnvVars;
 import jenkins.plugins.logstash.LogstashConfiguration;
 
 import java.util.ArrayList;
@@ -41,18 +42,27 @@ import java.util.Calendar;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 import java.util.Set;
+import java.util.Map.Entry;
 import java.util.logging.Logger;
 
 import static java.util.logging.Level.WARNING;
+import static java.util.logging.Level.FINE;
+
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.Serializable;
 import java.lang.invoke.MethodHandles;
 import net.sf.json.JSONObject;
 
 import org.apache.commons.lang.StringUtils;
+import org.springframework.beans.factory.support.PropertiesBeanDefinitionReader;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -65,11 +75,12 @@ import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
  * @author Rusty Gerard
  * @since 1.0.0
  */
-@SuppressFBWarnings(value="SE_NO_SERIALVERSIONID")
+@SuppressFBWarnings(value = "SE_NO_SERIALVERSIONID")
 public class BuildData implements Serializable {
 
   // ISO 8601 date format
   private final static Logger LOGGER = Logger.getLogger(MethodHandles.lookup().lookupClass().getCanonicalName());
+
   public static class TestData implements Serializable {
     private final int totalCount, skipCount, failCount, passCount;
     private final List<FailedTest> failedTestsWithErrorDetail;
@@ -77,19 +88,18 @@ public class BuildData implements Serializable {
 
     public static class FailedTest implements Serializable {
       private final String fullName, errorDetails;
+
       public FailedTest(String fullName, String errorDetails) {
         super();
         this.fullName = fullName;
         this.errorDetails = errorDetails;
       }
 
-      public String getFullName()
-      {
+      public String getFullName() {
         return fullName;
       }
 
-      public String getErrorDetails()
-      {
+      public String getErrorDetails() {
         return errorDetails;
       }
     }
@@ -119,39 +129,33 @@ public class BuildData implements Serializable {
       failedTests = new ArrayList<>();
       failedTestsWithErrorDetail = new ArrayList<>();
       for (TestResult result : testResultAction.getFailedTests()) {
-          failedTests.add(result.getFullName());
-          failedTestsWithErrorDetail.add(new FailedTest(result.getFullName(),result.getErrorDetails()));
+        failedTests.add(result.getFullName());
+        failedTestsWithErrorDetail.add(new FailedTest(result.getFullName(), result.getErrorDetails()));
       }
     }
 
-    public int getTotalCount()
-    {
-        return totalCount;
+    public int getTotalCount() {
+      return totalCount;
     }
 
-    public int getSkipCount()
-    {
-        return skipCount;
+    public int getSkipCount() {
+      return skipCount;
     }
 
-    public int getFailCount()
-    {
-        return failCount;
+    public int getFailCount() {
+      return failCount;
     }
 
-    public int getPassCount()
-    {
-        return passCount;
+    public int getPassCount() {
+      return passCount;
     }
 
-    public List<FailedTest> getFailedTestsWithErrorDetail()
-    {
-        return failedTestsWithErrorDetail;
+    public List<FailedTest> getFailedTestsWithErrorDetail() {
+      return failedTestsWithErrorDetail;
     }
 
-    public List<String> getFailedTests()
-    {
-        return failedTests;
+    public List<String> getFailedTests() {
+      return failedTests;
     }
   }
 
@@ -178,6 +182,8 @@ public class BuildData implements Serializable {
   private Map<String, String> buildVariables;
   private Set<String> sensitiveBuildVariables;
   private TestData testResults = null;
+
+  static final String LOGSTASH_FILTER_FILE = "LOGSTASH_FILTER_FILE";
 
   // Freestyle project build
   public BuildData(AbstractBuild<?, ?> build, Date currentTime, TaskListener listener) {
@@ -211,7 +217,7 @@ public class BuildData implements Serializable {
       buildVariables.putAll(build.getEnvironment(listener));
     } catch (Exception e) {
       // no base build env vars to merge
-      LOGGER.log(WARNING,"Unable update logstash buildVariables with EnvVars from " + build.getDisplayName(),e);
+      LOGGER.log(WARNING, "Unable update logstash buildVariables with EnvVars from " + build.getDisplayName(), e);
     }
     for (String key : sensitiveBuildVariables) {
       buildVariables.remove(key);
@@ -230,12 +236,56 @@ public class BuildData implements Serializable {
     rootBuildNum = buildNum;
 
     try {
-      // TODO: sensitive variables are not filtered, c.f. https://stackoverflow.com/questions/30916085
+      // TODO: sensitive variables are not filtered, c.f.
+      // https://stackoverflow.com/questions/30916085
       buildVariables = build.getEnvironment(listener);
     } catch (IOException | InterruptedException e) {
-      LOGGER.log(WARNING,"Unable to get environment for " + build.getDisplayName(),e);
+      LOGGER.log(WARNING, "Unable to get environment for " + build.getDisplayName(), e);
       buildVariables = new HashMap<>();
     }
+
+    // ELOS custom code
+    String logstashFilterFile = EnvVars.masterEnvVars.get(LOGSTASH_FILTER_FILE);
+
+    if (null != logstashFilterFile) {
+      LOGGER.log(FINE, "Config file path found: " + logstashFilterFile);
+      
+      Properties filters_props = new Properties();
+      try {
+        InputStream is = new FileInputStream(logstashFilterFile);
+        filters_props.load(is);
+
+        Set<Entry<Object, Object>> entries = filters_props.entrySet();
+        Iterator<Entry<Object, Object>> it = entries.iterator();
+        while(it.hasNext()) {
+          Entry<Object, Object> entry = it.next();
+          String key = (String) entry.getKey();
+          String val = (String) entry.getValue();
+          LOGGER.log(FINE, "Property entry: " + key + " == " + val);
+
+          if(val.isEmpty())
+            buildVariables.remove(key);
+          else {
+            int index = val.indexOf((int)':');
+            if(index != -1) {
+              String repl = val.substring(0, index);
+              String regex = val.substring(index + 1);
+              LOGGER.log(FINE, "REGEX: " + repl + " == " + regex);
+              buildVariables.replace(key, buildVariables.get(key).replaceAll(regex, repl));
+            }
+          }
+        }
+      } catch (Exception e) {
+        LOGGER.log(WARNING, "Unable to get filter file " + logstashFilterFile, e);
+      }
+
+      LOGGER.log(FINE, buildVariables.toString());
+    }
+  }
+
+  // ELOS custom code
+  private void filterBuildVariables() {
+    
   }
 
   private void initData(Run<?, ?> build, Date currentTime) {

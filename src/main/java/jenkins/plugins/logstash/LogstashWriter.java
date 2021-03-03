@@ -24,7 +24,6 @@
 
 package jenkins.plugins.logstash;
 
-
 import hudson.model.AbstractBuild;
 import hudson.model.TaskListener;
 import hudson.model.Run;
@@ -43,6 +42,7 @@ import java.io.Serializable;
 import java.nio.charset.Charset;
 import java.util.Arrays;
 import java.util.Date;
+import java.util.Iterator;
 import java.util.List;
 
 /**
@@ -130,9 +130,6 @@ public class LogstashWriter implements Serializable {
   public void writeBuildLog(int maxLines) {
     if (!isConnectionBroken()) {
       
-      // ELOS custom code
-      System.out.println("ELOS test debug message");
-      
       // FIXME: build.getLog() won't have the last few lines like "Finished: SUCCESS" because this hasn't returned yet...
       List<String> logLines;
       try {
@@ -149,6 +146,14 @@ public class LogstashWriter implements Serializable {
         // Continue with error info as logstash payload
         logLines = Arrays.asList(msg.split("\n"));
       }
+
+      // ELOS custom code
+      // System.out.println("ELOS test debug message - number of lines: " + logLines.size());
+      // Iterator it = logLines.iterator();
+      // while(it.hasNext()) {
+      //   String line = (String) it.next();
+      //   System.out.println("Line: " + line);
+      // }
 
       write(logLines);
     }
