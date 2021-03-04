@@ -246,11 +246,16 @@ public class BuildData implements Serializable {
 
     // ELOS custom code
     String logstashFilterFile = EnvVars.masterEnvVars.get(LOGSTASH_FILTER_FILE);
-
     if (null != logstashFilterFile) {
       LOGGER.log(FINE, "Config file path found: " + logstashFilterFile);
-      
-      Properties filters_props = new Properties();
+      filterBuildVariables(logstashFilterFile);
+      LOGGER.log(FINE, buildVariables.toString());
+    }
+  }
+
+  // ELOS custom code
+  private void filterBuildVariables(String logstashFilterFile) {
+    Properties filters_props = new Properties();
       try {
         InputStream is = new FileInputStream(logstashFilterFile);
         filters_props.load(is);
@@ -278,14 +283,6 @@ public class BuildData implements Serializable {
       } catch (Exception e) {
         LOGGER.log(WARNING, "Unable to get filter file " + logstashFilterFile, e);
       }
-
-      LOGGER.log(FINE, buildVariables.toString());
-    }
-  }
-
-  // ELOS custom code
-  private void filterBuildVariables() {
-    
   }
 
   private void initData(Run<?, ?> build, Date currentTime) {
