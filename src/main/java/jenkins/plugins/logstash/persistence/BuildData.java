@@ -268,20 +268,22 @@ public class BuildData implements Serializable {
           String val = (String) entry.getValue();
           LOGGER.log(FINE, "Property entry: " + key + " == " + val);
 
-          if(val.isEmpty())
-            buildVariables.remove(key);
-          else {
-            int index = val.indexOf((int)':');
-            if(index != -1) {
-              String repl = val.substring(0, index);
-              String regex = val.substring(index + 1);
-              LOGGER.log(FINE, "REGEX: " + repl + " == " + regex);
-              buildVariables.replace(key, buildVariables.get(key).replaceAll(regex, repl));
+          if (buildVariables.containsKey(key)) {
+            if(val.isEmpty())
+              buildVariables.remove(key);
+            else {
+              int index = val.indexOf((int)':');
+              if(index != -1) {
+                String repl = val.substring(0, index);
+                String regex = val.substring(index + 1);
+                LOGGER.log(FINE, "REGEX: " + repl + " == " + regex);
+                buildVariables.replace(key, buildVariables.get(key).replaceAll(regex, repl));
+              }
             }
           }
         }
       } catch (Exception e) {
-        LOGGER.log(WARNING, "Unable to get filter file " + logstashFilterFile, e);
+        LOGGER.log(WARNING, "Unable to process filter " + logstashFilterFile, e);
       }
   }
 
